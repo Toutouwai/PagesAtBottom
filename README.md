@@ -10,7 +10,7 @@ A module for ProcessWire CMS/CMF. Keeps selected pages at the bottom of their si
 
 ## Why?
 
-Because you want some pages to always be at the bottom of their siblings for one reason or another. And [someone requested it](https://processwire.com/talk/topic/20504-make-page-stick-to-the-bottom-of-the-page-tree/). :simple_smile:
+Because you want some pages to always be at the bottom of their siblings for one reason or another. And [someone requested it](https://processwire.com/talk/topic/20504-make-page-stick-to-the-bottom-of-the-page-tree/). : slightly_smiling_face :
 
 ## Usage
 
