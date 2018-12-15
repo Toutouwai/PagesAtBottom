@@ -18,4 +18,4 @@ Because you want some pages to always be at the bottom of their siblings for one
 
 [Install](http://modules.processwire.com/install-uninstall/) the Pages At Bottom module.
 
-Select one or more pages to keep at the bottom of their siblings.
+Select one or more pages to keep at the bottom of their siblings. If you select more than one bottom page per parent then their sort order in the page list will be the same as the sort order in the module config.
