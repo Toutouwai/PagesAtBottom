@@ -1,0 +1,170 @@
+<?php namespace ProcessWire;
+
+/**
+ *
+ * Pages At Bottom
+ *
+ * @author Robin Sallis
+ *
+ * ProcessWire 3.x
+ * Copyright (C) 2011 by Ryan Cramer
+ * Licensed under GNU/GPL v2, see LICENSE.TXT
+ *
+ * http://www.processwire.com
+ * http://www.ryancramer.com
+ *
+ */
+
+class PagesAtBottom extends WireData implements Module, ConfigurableModule {
+
+	/**
+	 * Module information
+	 */
+	public static function getModuleInfo() {
+		return array(
+			'title' => 'Pages At Bottom',
+			'version' => '0.1.0',
+			'summary' => 'Keeps selected pages at the bottom of their siblings.',
+			'author' => 'Robin Sallis',
+			'href' => 'https://github.com/PagesAtBottom/',
+			'icon' => 'long-arrow-down',
+			'autoload' => true,
+		);
+	}
+
+	protected const bottom = 99999;
+
+	/**
+	 * Construct
+	 */
+	public function __construct() {
+		parent::__construct();
+		$this->selected_pages = array();
+		$this->bottom_pages = array();
+		$this->bottom_parents = array();
+	}
+
+	/**
+	 * Ready
+	 */
+	public function init() {
+		$this->wire()->pages->addHookBefore('saveReady', $this, 'toBottomBeforeSave');
+		$this->wire()->pages->addHookBefore('sort', $this, 'toBottomBeforeSort');
+		$this->wire()->pages->addHookAfter('sort', $this, 'toBottomAfterSort');
+		$this->wire()->pages->addHookAfter('insertAfter', $this, 'insertBeforeInstead');
+		$this->addHookBefore('Modules::saveModuleConfigData', $this, 'processConfig');
+	}
+
+	/**
+	 * Set sort before page saved
+	 *
+	 * @param HookEvent $event
+	 */
+	protected function toBottomBeforeSave(HookEvent $event) {
+		/* @var Page $page */
+		$page = $event->arguments(0);
+		/* @var Pages $pages */
+		$pages = $event->object;
+		if($page->isChanged('children') && isset($this->bottom_parents[$page->id])) {
+			foreach($this->bottom_parents[$page->id] as $child_id) {
+				$p = $pages->get($child_id);
+				$this->sendToBottom($p);
+			}
+		}
+		if($page->isChanged('sort') && isset($this->bottom_pages[$page->id]) && !$page->pab_presorted) {
+			$page->sort = self::bottom;
+		}
+	}
+
+	/**
+	 * Send to bottom if page is sorted via Pages::sort()
+	 *
+	 * @param HookEvent $event
+	 */
+	protected function toBottomBeforeSort(HookEvent $event) {
+		$page = $event->arguments(0);
+		$value = $event->arguments(1);
+		if($value === true || !isset($this->bottom_pages[$page->id])) return;
+		$event->arguments(1, self::bottom);
+	}
+
+	/**
+	 * Send children to bottom if parent is sorted via Pages::sort()
+	 *
+	 * @param HookEvent $event
+	 */
+	protected function toBottomAfterSort(HookEvent $event) {
+		$page = $event->arguments(0);
+		$value = $event->arguments(1);
+		$pages = $event->object;
+		if($value !== true || !isset($this->bottom_parents[$page->id])) return;
+		foreach($this->bottom_parents[$page->id] as $child_id) {
+			$p = $pages->get($child_id);
+			$this->sendToBottom($p);
+		}
+	}
+
+	/**
+	 * If there is a request to insert a page after a bottom page, insert it before instead
+	 *
+	 * @param HookEvent $event
+	 */
+	protected function insertBeforeInstead(HookEvent $event) {
+		$page = $event->arguments(0);
+		$after_page = $event->arguments(1);
+		$pages = $event->object;
+		if(!isset($this->bottom_pages[$after_page->id])) return;
+		$event->replace = true;
+		$pages->insertBefore($page, $after_page);
+	}
+
+	/**
+	 * Process the module config data on save
+	 *
+	 * @param HookEvent $event
+	 */
+	protected function processConfig(HookEvent $event) {
+		$class = $event->arguments(0);
+		if($class != $this) return;
+		$pab_config = $event->arguments(1);
+		$pages = $this->wire()->pages;
+		$pab_config['bottom_pages'] = array();
+		$pab_config['bottom_parents'] = array();
+		foreach($pab_config['selected_pages'] as $id) {
+			$p = $pages($id);
+			$parent_id = $p->parent->id;
+			$pab_config['bottom_pages'][$id] = $parent_id;
+			$pab_config['bottom_parents'][$parent_id][] = $id;
+			$this->sendToBottom($p);
+		}
+		$event->arguments(1, $pab_config);
+	}
+
+	/**
+	 * Send page to bottom of siblings
+	 *
+	 * @param Page $page
+	 */
+	protected function sendToBottom($page) {
+		$page->of(false);
+		$page->sort = self::bottom;
+		$page->pab_presorted = true;
+		$page->save();
+	}
+
+	/**
+	 * Config inputfields
+	 *
+	 * @param InputfieldWrapper $inputfields
+	 */
+	public function getModuleConfigInputfields($inputfields) {
+		/* @var InputfieldPageListSelectMultiple $f */
+		$f = $this->wire()->modules->InputfieldPageListSelectMultiple;
+		$f_name = 'selected_pages';
+		$f->name = $f_name;
+		$f->label = $this->_('Pages to keep at the bottom of their siblings');
+		$f->value = $this->$f_name;
+		$inputfields->add($f);
+	}
+
+}
