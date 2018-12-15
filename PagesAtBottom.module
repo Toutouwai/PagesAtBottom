@@ -23,16 +23,15 @@ class PagesAtBottom extends WireData implements Module, ConfigurableModule {
 	public static function getModuleInfo() {
 		return array(
 			'title' => 'Pages At Bottom',
-			'version' => '0.1.0',
+			'version' => '0.1.1',
 			'summary' => 'Keeps selected pages at the bottom of their siblings.',
 			'author' => 'Robin Sallis',
 			'href' => 'https://github.com/PagesAtBottom/',
 			'icon' => 'long-arrow-down',
 			'autoload' => true,
+			'requires' => 'ProcessWire>=3.0.0',
 		);
 	}
-
-	protected const bottom = 99999;
 
 	/**
 	 * Construct
@@ -52,7 +51,7 @@ class PagesAtBottom extends WireData implements Module, ConfigurableModule {
 		$this->wire()->pages->addHookBefore('sort', $this, 'toBottomBeforeSort');
 		$this->wire()->pages->addHookAfter('sort', $this, 'toBottomAfterSort');
 		$this->wire()->pages->addHookAfter('insertAfter', $this, 'insertBeforeInstead');
-		$this->addHookBefore('Modules::saveModuleConfigData', $this, 'processConfig');
+		$this->addHookBefore('Modules::saveModuleConfigData', $this, 'beforeConfigSave');
 	}
 
 	/**
@@ -61,7 +60,6 @@ class PagesAtBottom extends WireData implements Module, ConfigurableModule {
 	 * @param HookEvent $event
 	 */
 	protected function toBottomBeforeSave(HookEvent $event) {
-		/* @var Page $page */
 		$page = $event->arguments(0);
 		/* @var Pages $pages */
 		$pages = $event->object;
@@ -72,7 +70,7 @@ class PagesAtBottom extends WireData implements Module, ConfigurableModule {
 			}
 		}
 		if($page->isChanged('sort') && isset($this->bottom_pages[$page->id]) && !$page->pab_presorted) {
-			$page->sort = self::bottom;
+			$page->sort = $this->getBottomSortValue($page);
 		}
 	}
 
@@ -85,7 +83,7 @@ class PagesAtBottom extends WireData implements Module, ConfigurableModule {
 		$page = $event->arguments(0);
 		$value = $event->arguments(1);
 		if($value === true || !isset($this->bottom_pages[$page->id])) return;
-		$event->arguments(1, self::bottom);
+		$event->arguments(1, $this->getBottomSortValue($page));
 	}
 
 	/**
@@ -96,6 +94,7 @@ class PagesAtBottom extends WireData implements Module, ConfigurableModule {
 	protected function toBottomAfterSort(HookEvent $event) {
 		$page = $event->arguments(0);
 		$value = $event->arguments(1);
+		/* @var Pages $pages */
 		$pages = $event->object;
 		if($value !== true || !isset($this->bottom_parents[$page->id])) return;
 		foreach($this->bottom_parents[$page->id] as $child_id) {
@@ -105,17 +104,30 @@ class PagesAtBottom extends WireData implements Module, ConfigurableModule {
 	}
 
 	/**
-	 * If there is a request to insert a page after a bottom page, insert it before instead
+	 * If there is a request to insert a page after a bottom page, insert it before the first bottom page instead
 	 *
 	 * @param HookEvent $event
 	 */
 	protected function insertBeforeInstead(HookEvent $event) {
 		$page = $event->arguments(0);
 		$after_page = $event->arguments(1);
+		/* @var Pages $pages */
 		$pages = $event->object;
 		if(!isset($this->bottom_pages[$after_page->id])) return;
 		$event->replace = true;
-		$pages->insertBefore($page, $after_page);
+		$parent_id = $this->bottom_pages[$after_page->id]['parent'];
+		if(count($this->bottom_parents[$parent_id]) > 1) {
+			foreach($this->bottom_parents[$parent_id] as $child_id) {
+				$before_page = $pages->get($child_id);
+				if($before_page->id) break;
+			}
+			if(!$before_page->id) $before_page = $after_page;
+		} else {
+			$before_page = $after_page;
+		}
+		$pages->insertBefore($page, $before_page);
+		// Reset sort values for siblings
+		$pages->sort($page->parent, true);
 	}
 
 	/**
@@ -123,7 +135,7 @@ class PagesAtBottom extends WireData implements Module, ConfigurableModule {
 	 *
 	 * @param HookEvent $event
 	 */
-	protected function processConfig(HookEvent $event) {
+	protected function beforeConfigSave(HookEvent $event) {
 		$class = $event->arguments(0);
 		if($class != $this) return;
 		$pab_config = $event->arguments(1);
@@ -133,9 +145,19 @@ class PagesAtBottom extends WireData implements Module, ConfigurableModule {
 		foreach($pab_config['selected_pages'] as $id) {
 			$p = $pages($id);
 			$parent_id = $p->parent->id;
-			$pab_config['bottom_pages'][$id] = $parent_id;
+			$pab_config['bottom_pages'][$id]['parent'] = $parent_id;
 			$pab_config['bottom_parents'][$parent_id][] = $id;
-			$this->sendToBottom($p);
+		}
+		foreach($pab_config['bottom_parents'] as $parent) {
+			$sort_value = 100000;
+			foreach($parent as $key => $child_id) {
+				$pab_config['bottom_pages'][$child_id]['sort'] = $sort_value + $key;
+				$p = $pages($child_id);
+				$p->of(false);
+				$p->sort = $sort_value + $key;
+				$p->pab_presorted = true;
+				$p->save();
+			}
 		}
 		$event->arguments(1, $pab_config);
 	}
@@ -147,9 +169,19 @@ class PagesAtBottom extends WireData implements Module, ConfigurableModule {
 	 */
 	protected function sendToBottom($page) {
 		$page->of(false);
-		$page->sort = self::bottom;
+		$page->sort = $this->getBottomSortValue($page);
 		$page->pab_presorted = true;
 		$page->save();
+	}
+
+	/**
+	 * Get the sort value for a bottom page
+	 *
+	 * @param Page $page
+	 * @return int
+	 */
+	protected function getBottomSortValue($page) {
+		return isset($this->bottom_pages[$page->id]['sort']) ? $this->bottom_pages[$page->id]['sort'] : 100000;
 	}
 
 	/**
